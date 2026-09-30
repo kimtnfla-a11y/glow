@@ -1,43 +1,120 @@
-name: Build GlowFluo Photo APK
+package com.glowfluo.photo;
 
-on:
-  workflow_dispatch:
-  push:
-    branches:
-      - main
+import android.graphics.Bitmap;
+import android.graphics.Color;
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
+public class LutFilter {
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    private final float strength;
 
-      - name: Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
+    public LutFilter(float strength) {
+        this.strength = Math.max(0f, Math.min(1f, strength));
+    }
 
-      - name: Gradle 8.11.1
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.11.1'
+    public Bitmap apply(Bitmap source) {
+        if (source == null) {
+            return null;
+        }
 
-      - name: Extract project
-        run: |
-          unzip -o GlowFluoPhoto_v1.zip
-          echo "PROJECT FILES:"
-          find GlowFluoPhoto -type f | sort
+        Bitmap result = source.copy(Bitmap.Config.ARGB_8888, true);
+        int width = result.getWidth();
+        int height = result.getHeight();
 
-      - name: Build APK
-        run: |
-          cd GlowFluoPhoto
-          gradle --no-daemon :app:assembleDebug
+        int[] px = new int[width * height];
+        result.getPixels(px, 0, width, 0, 0, width, height);
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: GlowFluoPhoto-debug
-          path: GlowFluoPhoto/app/build/outputs/apk/debug/app-debug.apk
+        for (int i = 0; i < px.length; i++) {
+            int c = px[i];
+
+            float red = Color.red(c) / 255f;
+            float green = Color.green(c) / 255f;
+            float blue = Color.blue(c) / 255f;
+
+            float[] graded = sample(red, green, blue);
+
+            int rr = Math.round(
+                    255f * (red * (1f - strength) + graded[0] * strength)
+            );
+
+            int gg = Math.round(
+                    255f * (green * (1f - strength) + graded[1] * strength)
+            );
+
+            int bb = Math.round(
+                    255f * (blue * (1f - strength) + graded[2] * strength)
+            );
+
+            px[i] = Color.argb(
+                    Color.alpha(c),
+                    clamp255(rr),
+                    clamp255(gg),
+                    clamp255(bb)
+            );
+        }
+
+        result.setPixels(px, 0, width, 0, 0, width, height);
+        return result;
+    }
+
+    private float[] sample(float r, float g, float b) {
+
+        /*
+         * Warm fluorescent / film-inspired grading.
+         *
+         * Slightly warm highlights,
+         * gently lifted blacks,
+         * muted greens,
+         * restrained blues.
+         */
+
+        float luminance =
+                0.299f * r +
+                0.587f * g +
+                0.114f * b;
+
+        // Slightly lift shadows for a faded-film response.
+        float shadowLift = 0.035f * (1f - luminance);
+
+        r += 0.045f + shadowLift;
+        g += 0.018f + shadowLift * 0.55f;
+        b -= 0.025f;
+
+        // Reduce excessive green.
+        g *= 0.975f;
+
+        // Warm highlights.
+        if (luminance > 0.60f) {
+            float highlight = (luminance - 0.60f) / 0.40f;
+
+            r += 0.025f * highlight;
+            g += 0.010f * highlight;
+            b -= 0.035f * highlight;
+        }
+
+        // Keep colors slightly muted instead of overly digital.
+        float gray =
+                0.299f * r +
+                0.587f * g +
+                0.114f * b;
+
+        float saturation = 0.94f;
+
+        r = gray + (r - gray) * saturation;
+        g = gray + (g - gray) * saturation;
+        b = gray + (b - gray) * saturation;
+
+        return new float[]{
+                clamp01(r),
+                clamp01(g),
+                clamp01(b)
+        };
+    }
+
+    private int clamp255(int value) {
+        return Math.max(0, Math.min(255, value));
+    }
+
+    private float clamp01(float value) {
+        return Math.max(0f, Math.min(1f, value));
+    }
+}
