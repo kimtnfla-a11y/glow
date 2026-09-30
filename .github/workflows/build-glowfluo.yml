@@ -1,0 +1,116 @@
+name: Build GlowFluo Photo APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Debug APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Install Android SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Extract project ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ZIP="GlowFluoPhoto_FINAL.zip"
+
+          if [ ! -f "$ZIP" ]; then
+            echo "ERROR: $ZIP not found"
+            exit 1
+          fi
+
+          rm -rf "$RUNNER_TEMP/glowfluo"
+          mkdir -p "$RUNNER_TEMP/glowfluo"
+
+          unzip -q "$ZIP" -d "$RUNNER_TEMP/glowfluo"
+
+          echo "ZIP extracted."
+          echo "Searching for settings.gradle..."
+
+          PROJECT_DIR=""
+
+          while IFS= read -r file; do
+            PROJECT_DIR="$(dirname "$file")"
+            break
+          done < <(
+            find "$RUNNER_TEMP/glowfluo" \
+              -type f \
+              \( -name "settings.gradle" -o -name "settings.gradle.kts" \)
+          )
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: Android project was not found inside ZIP."
+            echo "ZIP contents:"
+            find "$RUNNER_TEMP/glowfluo" -maxdepth 5 -type f | sort
+            exit 1
+          fi
+
+          echo "Android project found:"
+          echo "$PROJECT_DIR"
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Build APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "$PROJECT_DIR"
+
+          echo "======================================"
+          echo "BUILDING GLOWFLUO PHOTO"
+          echo "======================================"
+
+          gradle clean assembleDebug \
+            --stacktrace \
+            --no-daemon
+
+      - name: Find APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APK="$(find "$PROJECT_DIR" \
+            -type f \
+            -path "*/build/outputs/apk/debug/*.apk" \
+            -print -quit)"
+
+          if [ -z "$APK" ]; then
+            echo "ERROR: APK was not generated."
+            find "$PROJECT_DIR" -type f -name "*.apk" -print
+            exit 1
+          fi
+
+          echo "APK generated:"
+          ls -lh "$APK"
+
+          echo "APK_PATH=$APK" >> "$GITHUB_ENV"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: GlowFluoPhoto-debug
+          path: ${{ env.APK_PATH }}
+          if-no-files-found: error
+          retention-days: 14
