@@ -1,0 +1,107 @@
+name: Build GlowFluo FROM ZIP
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: CHECK NEW WORKFLOW
+        run: |
+          echo "======================================"
+          echo "THIS IS THE NEW ZIP WORKFLOW"
+          echo "======================================"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Install Android SDK
+        run: |
+          set -e
+
+          sdkmanager "platform-tools"
+          sdkmanager "platforms;android-35"
+          sdkmanager "build-tools;35.0.0"
+
+      - name: UNZIP PROJECT
+        run: |
+          set -e
+
+          echo "Looking for ZIP..."
+
+          ls -lh
+
+          unzip -q GlowFluoPhoto_FINAL.zip -d /tmp/glowfluo
+
+          echo "======================================"
+          echo "ZIP CONTENT"
+          echo "======================================"
+
+          find /tmp/glowfluo -type f | sort
+
+      - name: FIND AND BUILD PROJECT
+        run: |
+          set -e
+
+          PROJECT=$(find /tmp/glowfluo \
+            -type f \
+            -name "settings.gradle" \
+            -print -quit)
+
+          if [ -z "$PROJECT" ]; then
+            echo "ERROR: settings.gradle was not found INSIDE THE EXTRACTED ZIP."
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$PROJECT")
+
+          echo "======================================"
+          echo "PROJECT FOUND"
+          echo "$PROJECT_DIR"
+          echo "======================================"
+
+          cd "$PROJECT_DIR"
+
+          gradle clean assembleDebug \
+            --stacktrace \
+            --no-daemon
+
+      - name: Find APK
+        run: |
+          set -e
+
+          APK=$(find /tmp/glowfluo \
+            -type f \
+            -name "*.apk" \
+            -print -quit)
+
+          if [ -z "$APK" ]; then
+            echo "ERROR: APK was not created."
+            exit 1
+          fi
+
+          echo "======================================"
+          echo "APK CREATED"
+          echo "$APK"
+          echo "======================================"
+
+          cp "$APK" "$GITHUB_WORKSPACE/GlowFluoPhoto.apk"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: GlowFluoPhoto-APK
+          path: GlowFluoPhoto.apk
